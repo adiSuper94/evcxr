@@ -11,6 +11,8 @@ use crate::errors::CompilationError;
 use crate::errors::Error;
 use crate::eval_context::Config;
 use crate::eval_context::ContextState;
+use crate::eval_context::InputRequest;
+use crate::EvalCallbacks;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use std::fs;
@@ -22,6 +24,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::process::Output;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::thread;
 
 fn shared_object_name_from_crate_name(crate_name: &str) -> String {
@@ -146,6 +149,7 @@ impl Module {
         code_block: &CodeBlock,
         config: &Config,
     ) -> Result<Vec<CompilationError>, Error> {
+        println!("hiihellllooooooooooooooooooooooooooooo");
         self.write_code(code_block)?;
         let output = config
             .cargo_command("check")
@@ -164,6 +168,7 @@ impl Module {
         &mut self,
         code_block: &CodeBlock,
         config: &Config,
+        callback: &mut EvalCallbacks,
     ) -> Result<SoFile, Error> {
         let mut command = config.cargo_command("rustc");
         if config.time_passes && config.toolchain != "nightly" {
@@ -191,7 +196,7 @@ impl Module {
             command.arg("-Ztime-passes");
         }
         self.write_code(code_block)?;
-        let cargo_output = run_cargo(command, code_block)?;
+        let cargo_output = run_cargo(command, code_block, callback)?;
         if config.time_passes {
             let output = String::from_utf8_lossy(&cargo_output.stderr);
             eprintln!("{output}");
@@ -272,37 +277,34 @@ overflow-checks = true
     }
 }
 
-fn tee(mut stream: impl Read, callback: impl Fn(&str)) -> Result<String, Error> {
+fn tee(
+    mut stream: impl Read,
+    callback_arc_mutex: Arc<dyn Fn(InputRequest) -> String + Send + Sync + 'static>,
+) -> Result<String, Error> {
     let mut buf_stream = BufReader::new(&mut stream);
     let mut out: String = String::new();
-    let mut buff = String::new();
     // I dont like infinite loops
     loop {
+        let mut buff = String::new();
         let bytes_read = buf_stream.read_line(&mut buff)?;
         if bytes_read == 0 {
             return Ok(out);
         }
         //TODO:Is state variable needed for the callback, incase the callback needs to buffer some info?
-        callback(&buff);
         out.push_str(&buff);
+        println!("{}", buff);
         buff.clear();
-    }
-}
-
-fn get_callback(code_block: &CodeBlock) -> impl Fn(&str) {
-    //Idea is to add some check on the code_block to decide if additional logging is necessary
-    if let Some(_first_segement) = code_block.segments.get(0) {
-        move |s: &str| {
-            println!("{s}");
-        }
-    } else {
-        move |_: &str| {}
+        // (callback.input_reader)(InputRequest {
+        //     prompt: buff,
+        //     is_password: false,
+        // });
     }
 }
 
 fn run_cargo(
     mut command: std::process::Command,
     code_block: &CodeBlock,
+    callback: &mut EvalCallbacks,
 ) -> Result<std::process::Output, Error> {
     let mut child_process = match command
         .stdout(Stdio::piped())
@@ -315,12 +317,13 @@ fn run_cargo(
     let child_out = child_process.stdout.take().unwrap();
     let child_err = child_process.stderr.take().unwrap();
     // adding `callback` as a parameter of the function, makes the signature look complex.
-    let callback = get_callback(code_block);
-    let out_handle = thread::spawn(|| tee(child_out, |_: &str| {}));
-    let err_handle = thread::spawn(|| tee(child_err, callback));
+    let err_callback_ref = Arc::new(callback.input_reader);
+    let err_handle =
+        thread::spawn(|| -> Result<String, Error> { tee(child_err, err_callback_ref) });
     //TODO: might have to change err handling.
     let err = err_handle.join().unwrap()?;
-    let out = out_handle.join().unwrap()?;
+    let out_callback_ref = Arc::new(move |_| -> String { String::new() });
+    let out = tee(child_out, out_callback_ref)?;
 
     let exit_status = match child_process.wait() {
         Ok(out) => out,

@@ -11,6 +11,7 @@ use colored::*;
 use evcxr::CommandContext;
 use evcxr::CompilationError;
 use evcxr::Error;
+use evcxr::EvalCallbacks;
 use evcxr::Theme;
 use evcxr_repl::BgInitMutex;
 use evcxr_repl::EvcxrRustylineHelper;
@@ -86,8 +87,16 @@ impl Repl {
         }
     }
     fn execute(&mut self, to_run: &str) -> Result<(), Error> {
+        self.execute_with_callbacks(to_run, &mut EvalCallbacks::default())
+    }
+
+    fn execute_with_callbacks(
+        &mut self,
+        to_run: &str,
+        callback: &mut EvalCallbacks,
+    ) -> Result<(), Error> {
         let execution_result = match &mut *self.command_context.lock() {
-            Ok(context) => context.execute(to_run),
+            Ok(context) => context.execute_with_callbacks(to_run, callback),
             Err(error) => return Err(error.clone()),
         };
         let success = match execution_result {

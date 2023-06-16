@@ -649,7 +649,7 @@ impl EvalContext {
         callbacks: &mut EvalCallbacks,
     ) -> Result<ExecutionArtifacts, Error> {
         let code = state.code_to_compile(user_code, compilation_mode);
-        let so_file = self.module.compile(&code, &state.config)?;
+        let so_file = self.module.compile(&code, &state.config, callbacks)?;
 
         if compilation_mode == CompilationMode::NoCatchExpectError {
             // Uh-oh, caller was expecting an error, return OK and the caller can return the
