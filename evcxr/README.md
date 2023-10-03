@@ -30,3 +30,4 @@ See [how it works](HOW_IT_WORKS.md)
 ## Release notes
 
 See [release notes](RELEASE_NOTES.md)
+
